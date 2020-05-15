@@ -1,0 +1,80 @@
+box:
+ id: node
+workflows:
+  - name: test
+    pipelines:
+    - name: build
+    - name: push-build
+      requires:
+      - build
+    - name: deploy-to-minikube
+      requires:
+      - push-build
+
+# Build definition
+build:
+  # The steps that will be executed on build
+  steps:
+    - script:
+        code: |
+          echo "USERNAME is $USERNAME"
+          export IMAGE_BASE="testwerckernode"
+          echo "Image is $IMAGE_BASE"
+    - internal/docker-build:
+       image-name: $IMAGE_BASE
+       dockerfile: Dockerfile1
+    - internal/docker-run:
+        image: $IMAGE_BASE
+        name: $CNT_NAME
+        port: 80
+    - script:
+         code: |
+           echo "Testing the container.."
+           echo "CONTAINER NAME is $CNT_NAME"
+           curl -o /var/output.html $CNT_NAME:80
+           cat /var/output.html
+    - script:
+        name: Test the container that we started as a service
+        code: |
+            if curlOutput=`curl -s $CNT_NAME:80`; then
+                export expected=`echo $curlOutput|wc -c`
+                if [ $expected -eq 0 ]; then
+                    echo "Test failed container gave unexpected response: "
+                    exit 1
+                else
+                    echo "TestPassed : container gave expected response: " $curlOutput
+                fi
+            else
+                echo "Test failed: container did not respond"
+                exit 1
+            fi
+push-build:
+ steps:
+    - internal/docker-push:
+        image: $IMAGE_BASE
+        repository: $IMAGE_BASE
+        username: $USERNAME
+        password: $PASSWORD
+    - script:
+          name: Just-Pushed
+          code:
+             echo "Pushed the Image to Cloud"
+
+deploy-to-minikube:
+  box:
+        id: alpine
+        cmd: /bin/sh
+  steps:
+    - bash-template
+
+    - script:
+        name: "Visualise Kubernetes config"
+        code: cat pod.yml
+    - kubectl:
+        name: create POD and Service
+        server: $KUBERNETES_MASTER
+        token: $KUBERNETES_TOKEN
+        insecure-skip-tls-verify: true
+        command: create -f pod.yml
+
+
